@@ -7,9 +7,9 @@
 scrapeSource: 10.206.213.243
 
 targets:
-  - name: ubuntu01          # becomes the `host` label in Prometheus/Grafana
-    address: 10.0.0.101     # IP the exporter polls (SNMP udp/161)
+  - name: jeffrey-ubuntu01          # becomes the `host` label in Prometheus/Grafana
+    address: 10.0.0.250     # IP the exporter polls (SNMP udp/161)
     gpu: true               # true = add the NVIDIA nvidia-smi extends
-  - name: ubuntu02
-    address: 10.0.0.102
-    gpu: false
+  # - name: jeffrey-ubuntu02
+  #   address: 10.0.0.102
+  #   gpu: false
