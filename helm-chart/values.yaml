@@ -1,0 +1,81 @@
+image:
+  repository: prom/snmp-exporter
+  tag: v0.26.0
+  pullPolicy: IfNotPresent
+
+# Secret created by the deploy workflow (NOT by Helm) from OpenBao homelab/data/snmp.
+# Keys: SNMP_USER, SNMP_AUTH_PASS, SNMP_PRIV_PASS
+existingSecretName: snmp-exporter-auth
+
+exporter:
+  port: 9116
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
+scrape:
+  interval: 30s
+  timeout: 20s
+  module: ubuntu       # module name inside snmp.yml
+  auth: ubuntu_v3      # auth name inside snmp.yml
+
+# Filled from hosts.yaml:  helm upgrade --install ... -f hosts.yaml
+targets: []
+
+# Label the existing kube-prometheus-stack uses to select ScrapeConfigs / PrometheusRules
+prometheusRelease: kube-prometheus-stack
+
+# Filesystems shown/alerted on (hrStorageDescr). Excludes /run, /dev/shm, /snap/* etc.
+# Keep in sync with the dashboard queries (helm-chart/dashboards/ubuntu-snmp.json).
+storage:
+  mountRegex: "/|/boot.*|/home.*|/mnt.*|/srv.*|/data.*"
+
+dashboard:
+  enabled: true
+
+alerts:
+  enabled: true
+  # Each rule generates <name>Warning and <name>Critical.
+  rules:
+    - name: UbuntuCpuUsed
+      expr: '100 - ssCpuIdle'
+      warning: 80
+      critical: 90
+      duration: 5m
+      summary: "CPU used on {{ $labels.host }} is high"
+    - name: UbuntuRamUsed
+      expr: '100 * (1 - (memAvailReal + memBuffer + memCached) / memTotalReal)'
+      warning: 80
+      critical: 90
+      duration: 5m
+      summary: "RAM used on {{ $labels.host }} is high"
+    - name: UbuntuSwapUsed
+      expr: '100 * (1 - memAvailSwap / memTotalSwap) and memTotalSwap > 0'
+      warning: 80
+      critical: 90
+      duration: 10m
+      summary: "Swap used on {{ $labels.host }} is high"
+    - name: UbuntuStorageUsed
+      expr: '100 * hrStorageUsed{hrStorageDescr=~"__MOUNT_REGEX__"} / hrStorageSize{hrStorageDescr=~"__MOUNT_REGEX__"}'
+      warning: 80
+      critical: 90
+      duration: 10m
+      summary: "Filesystem {{ $labels.hrStorageDescr }} on {{ $labels.host }} is filling up"
+    - name: UbuntuGpuUtil
+      expr: 'nsExtendOutput1Line{nsExtendToken="gpu-util"}'
+      warning: 80
+      critical: 90
+      duration: 5m
+      summary: "GPU utilisation on {{ $labels.host }} is high"
+    - name: UbuntuGpuMemory
+      expr: 'nsExtendOutput1Line{nsExtendToken="gpu-mem-pct"}'
+      warning: 80
+      critical: 90
+      duration: 5m
+      summary: "GPU memory on {{ $labels.host }} is high"
+    - name: UbuntuGpuTemp
+      expr: 'nsExtendOutput1Line{nsExtendToken="gpu-temp"}'
+      warning: 75
+      critical: 85
+      duration: 5m
+      summary: "GPU temperature on {{ $labels.host }} is high"

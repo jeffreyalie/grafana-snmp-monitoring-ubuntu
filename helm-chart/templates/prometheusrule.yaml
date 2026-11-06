@@ -1,0 +1,39 @@
+{{- if .Values.alerts.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    release: {{ .Values.prometheusRelease }}
+spec:
+  groups:
+    - name: {{ .Release.Name }}
+      rules:
+        - alert: UbuntuHostDown
+          expr: up{job="{{ .Release.Name }}"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: {{ "SNMP target {{ $labels.host }} ({{ $labels.instance }}) is unreachable" | quote }}
+        {{- range .Values.alerts.rules }}
+        {{- $expr := .expr | replace "__MOUNT_REGEX__" $.Values.storage.mountRegex }}
+        - alert: {{ .name }}Warning
+          expr: |
+            ({{ $expr }}) > {{ .warning }}
+          for: {{ .duration }}
+          labels:
+            severity: warning
+          annotations:
+            summary: {{ .summary | quote }}
+        - alert: {{ .name }}Critical
+          expr: |
+            ({{ $expr }}) > {{ .critical }}
+          for: {{ .duration }}
+          labels:
+            severity: critical
+          annotations:
+            summary: {{ .summary | quote }}
+        {{- end }}
+{{- end }}

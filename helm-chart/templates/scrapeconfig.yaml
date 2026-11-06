@@ -1,0 +1,31 @@
+{{- if not .Values.targets }}
+{{- fail "values.targets is empty: deploy with  -f hosts.yaml  (see hosts.yaml in the repo root)" }}
+{{- end }}
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    release: {{ .Values.prometheusRelease }}
+spec:
+  jobName: {{ .Release.Name }}
+  metricsPath: /snmp
+  scrapeInterval: {{ .Values.scrape.interval }}
+  scrapeTimeout: {{ .Values.scrape.timeout }}
+  params:
+    module: [{{ .Values.scrape.module }}]
+    auth: [{{ .Values.scrape.auth }}]
+  staticConfigs:
+    {{- range .Values.targets }}
+    - targets: [{{ .address | quote }}]
+      labels:
+        host: {{ .name | quote }}
+    {{- end }}
+  relabelings:
+    - sourceLabels: [__address__]
+      targetLabel: __param_target
+    - sourceLabels: [__param_target]
+      targetLabel: instance
+    - targetLabel: __address__
+      replacement: {{ .Release.Name }}-snmp-exporter.{{ .Release.Namespace }}.svc:{{ .Values.exporter.port }}

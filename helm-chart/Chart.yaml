@@ -1,0 +1,6 @@
+apiVersion: v2
+name: grafana-snmp-ubuntu
+description: snmp_exporter + ScrapeConfig + alert rules + bargauge dashboard for Ubuntu hosts (kube-prometheus-stack)
+type: application
+version: 0.1.0
+appVersion: "0.26.0"

@@ -1,0 +1,15 @@
+# Single source of truth for BOTH the Ansible role and the Helm chart.
+#   - Ansible builds its inventory from `targets`
+#   - Helm gets it with:  helm upgrade --install ... -f hosts.yaml
+
+# IP the snmp_exporter pod's traffic leaves from (the MicroK8s node).
+# Used for the ufw rule on each Ubuntu host (udp/161).
+scrapeSource: 10.206.213.243
+
+targets:
+  - name: ubuntu01          # becomes the `host` label in Prometheus/Grafana
+    address: 10.0.0.101     # IP the exporter polls (SNMP udp/161)
+    gpu: true               # true = add the NVIDIA nvidia-smi extends
+  - name: ubuntu02
+    address: 10.0.0.102
+    gpu: false

@@ -1,0 +1,65 @@
+- name: Check credentials were provided
+  ansible.builtin.assert:
+    that:
+      - snmp_user | length > 0
+      - snmp_auth_pass | length >= 8
+      - snmp_priv_pass | length >= 8
+    fail_msg: "SNMP_USER / SNMP_AUTH_PASS / SNMP_PRIV_PASS missing (passphrases need >= 8 chars)"
+  no_log: true
+
+- name: Install snmpd and the snmp client tools
+  ansible.builtin.apt:
+    name: [snmpd, snmp]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Check nvidia-smi exists (GPU hosts only)
+  ansible.builtin.stat:
+    path: /usr/bin/nvidia-smi
+  register: nvsmi
+  when: snmp_gpu | bool
+
+- name: Fail early if a GPU host has no NVIDIA driver tools
+  ansible.builtin.fail:
+    msg: "gpu: true for {{ inventory_hostname }} but /usr/bin/nvidia-smi is missing (install the NVIDIA driver / nvidia-utils)"
+  when: snmp_gpu | bool and not nvsmi.stat.exists
+
+- name: Write /etc/snmp/snmpd.conf
+  ansible.builtin.template:
+    src: snmpd.conf.j2
+    dest: /etc/snmp/snmpd.conf
+    owner: root
+    group: Debian-snmp   # file holds the passphrases: not world-readable
+    mode: "0640"
+  no_log: true
+  notify: Restart snmpd
+
+- name: Enable and start snmpd
+  ansible.builtin.service:
+    name: snmpd
+    state: started
+    enabled: true
+
+- name: Apply pending restart now (so the check below sees the new config)
+  ansible.builtin.meta: flush_handlers
+
+- name: Allow SNMP from the scrape source (only if ufw is active)
+  ansible.builtin.shell: |
+    if ufw status | grep -q "Status: active"; then
+      ufw allow from {{ snmp_allowed_source }} to any port 161 proto udp
+    fi
+  when: snmp_allowed_source | length > 0
+  changed_when: false
+
+- name: Local SNMPv3 self-test (CPU idle OID)
+  ansible.builtin.command: >
+    snmpget -v3 -l authPriv -u {{ snmp_user }}
+    -a SHA -A {{ snmp_auth_pass }} -x AES -X {{ snmp_priv_pass }}
+    localhost 1.3.6.1.4.1.2021.11.11.0
+  register: selftest
+  retries: 5
+  delay: 2
+  until: selftest.rc == 0
+  changed_when: false
+  no_log: true

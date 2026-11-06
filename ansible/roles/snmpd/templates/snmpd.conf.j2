@@ -1,0 +1,18 @@
+# Managed by Ansible (grafana-snmp-ubuntu). Do not edit by hand.
+agentaddress {{ snmp_listen }}
+sysLocation homelab
+sysContact root@localhost
+
+# SNMPv3 read-only user, auth+encryption required, whole OID tree.
+# Net-SNMP localises these passphrases on start and stores the result in
+# /var/lib/snmp/snmpd.conf.
+createUser {{ snmp_user }} SHA "{{ snmp_auth_pass }}" AES "{{ snmp_priv_pass }}"
+rouser {{ snmp_user }} priv .1
+
+{% if snmp_gpu | bool %}
+# NVIDIA GPU metrics. One value per host: the highest across all GPUs.
+# Exposed as NET-SNMP-EXTEND-MIB::nsExtendOutput1Line."<name>"
+extend-sh gpu-util /usr/bin/nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits | sort -n | tail -1
+extend-sh gpu-temp /usr/bin/nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits | sort -n | tail -1
+extend-sh gpu-mem-pct /usr/bin/nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits | awk -F', ' '{p=$1/$2*100; if (p>m) m=p} END {printf "%.1f", m}'
+{% endif %}

@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-snmp-exporter
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}-snmp-exporter
+data:
+  snmp.yml: |
+    # Hand-written with numeric OIDs, so no MIB files or generator are needed.
+    # snmp_exporter runs with --config.expand-environment-variables:
+    #   ${SNMP_*} come from the Secret, and a literal "$" must be written "$$".
+    auths:
+      {{ .Values.scrape.auth }}:
+        version: 3
+        security_level: authPriv
+        username: ${SNMP_USER}
+        password: ${SNMP_AUTH_PASS}
+        auth_protocol: SHA
+        priv_protocol: AES
+        priv_password: ${SNMP_PRIV_PASS}
+
+    modules:
+      {{ .Values.scrape.module }}:
+        retries: 1
+        timeout: 5s
+        max_repetitions: 25
+        walk:
+          - 1.3.6.1.4.1.2021.4            # UCD memory
+          - 1.3.6.1.4.1.2021.11           # UCD CPU
+          - 1.3.6.1.2.1.25.2.3.1          # HOST-RESOURCES hrStorageTable (disks)
+          - 1.3.6.1.4.1.8072.1.3.2.3.1.1  # NET-SNMP-EXTEND output (GPU)
+        metrics:
+          # ---- CPU (percent) ----
+          - name: ssCpuUser
+            oid: 1.3.6.1.4.1.2021.11.9
+            type: gauge
+            help: Percentage of CPU time in user mode
+          - name: ssCpuSystem
+            oid: 1.3.6.1.4.1.2021.11.10
+            type: gauge
+            help: Percentage of CPU time in system mode
+          - name: ssCpuIdle
+            oid: 1.3.6.1.4.1.2021.11.11
+            type: gauge
+            help: Percentage of CPU time idle
+
+          # ---- Memory (kB) ----
+          - name: memTotalSwap
+            oid: 1.3.6.1.4.1.2021.4.3
+            type: gauge
+            help: Total swap in kB
+          - name: memAvailSwap
+            oid: 1.3.6.1.4.1.2021.4.4
+            type: gauge
+            help: Free swap in kB
+          - name: memTotalReal
+            oid: 1.3.6.1.4.1.2021.4.5
+            type: gauge
+            help: Total RAM in kB
+          - name: memAvailReal
+            oid: 1.3.6.1.4.1.2021.4.6
+            type: gauge
+            help: Free RAM in kB
+          - name: memBuffer
+            oid: 1.3.6.1.4.1.2021.4.14
+            type: gauge
+            help: Buffer memory in kB
+          - name: memCached
+            oid: 1.3.6.1.4.1.2021.4.15
+            type: gauge
+            help: Cached memory in kB
+
+          # ---- Storage (HOST-RESOURCES-MIB) ----
+          - name: hrStorageAllocationUnits
+            oid: 1.3.6.1.2.1.25.2.3.1.4
+            type: gauge
+            help: Size of one allocation unit in bytes
+            indexes:
+              - labelname: hrStorageIndex
+                type: gauge
+            lookups:
+              - labels: [hrStorageIndex]
+                labelname: hrStorageDescr
+                oid: 1.3.6.1.2.1.25.2.3.1.3
+                type: DisplayString
+          - name: hrStorageSize
+            oid: 1.3.6.1.2.1.25.2.3.1.5
+            type: gauge
+            help: Size of the storage in allocation units
+            indexes:
+              - labelname: hrStorageIndex
+                type: gauge
+            lookups:
+              - labels: [hrStorageIndex]
+                labelname: hrStorageDescr
+                oid: 1.3.6.1.2.1.25.2.3.1.3
+                type: DisplayString
+          - name: hrStorageUsed
+            oid: 1.3.6.1.2.1.25.2.3.1.6
+            type: gauge
+            help: Used storage in allocation units
+            indexes:
+              - labelname: hrStorageIndex
+                type: gauge
+            lookups:
+              - labels: [hrStorageIndex]
+                labelname: hrStorageDescr
+                oid: 1.3.6.1.2.1.25.2.3.1.3
+                type: DisplayString
+
+          # ---- GPU via snmpd "extend" (value is the first output line) ----
+          - name: nsExtendOutput1Line
+            oid: 1.3.6.1.4.1.8072.1.3.2.3.1.1
+            type: DisplayString
+            help: First output line of an snmpd extend command (gpu-util, gpu-mem-pct, gpu-temp)
+            indexes:
+              - labelname: nsExtendToken
+                type: OctetString
+                implied: true
+            regex_extracts:
+              '':
+                - regex: '\s*(-?[0-9]+(?:\.[0-9]+)?)\s*'
+                  value: '$$1'

@@ -1,0 +1,27 @@
+# Installs and configures snmpd (SNMPv3 authPriv, read-only) on the Ubuntu hosts
+# listed in ../hosts.yaml. Credentials come from the environment (set by the
+# workflow from OpenBao homelab/data/snmp): SNMP_USER, SNMP_AUTH_PASS, SNMP_PRIV_PASS.
+# SSH key: ANSIBLE_PRIVATE_KEY_FILE (from OpenBao homelab/data/ansible).
+- name: Build inventory from hosts.yaml
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../hosts.yaml
+  tasks:
+    - name: Add targets
+      ansible.builtin.add_host:
+        name: "{{ item.name }}"
+        groups: snmp_targets
+        ansible_host: "{{ item.address }}"
+        snmp_gpu: "{{ item.gpu | default(false) }}"
+        snmp_allowed_source: "{{ scrapeSource }}"
+      loop: "{{ targets }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+- name: Configure SNMP agent
+  hosts: snmp_targets
+  become: true
+  roles:
+    - snmpd

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-snmp-exporter
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}-snmp-exporter
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Release.Name }}-snmp-exporter
+  ports:
+    - name: http
+      protocol: TCP
+      port: {{ .Values.exporter.port }}
+      targetPort: http

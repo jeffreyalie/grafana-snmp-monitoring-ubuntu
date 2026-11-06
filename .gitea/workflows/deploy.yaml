@@ -1,0 +1,127 @@
+name: Deploy grafana-snmp-ubuntu
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'helm-chart/**'
+      - 'ansible/**'
+      - 'hosts.yaml'
+      - '.gitea/workflows/deploy.yaml'
+  workflow_dispatch:
+    inputs:
+      configure_hosts:
+        description: 'Run the Ansible role first (install/configure snmpd on the Ubuntu hosts)'
+        type: boolean
+        default: true
+
+env:
+  RELEASE: grafana-snmp-ubuntu
+  NAMESPACE: monitoring          # same namespace as kube-prometheus-stack
+  AUTH_SECRET: snmp-exporter-auth
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VAULT_ADDR:      ${{ secrets.VAULT_ADDR }}
+      VAULT_ROLE_ID:   ${{ secrets.VAULT_ROLE_ID }}
+      VAULT_SECRET_ID: ${{ secrets.VAULT_SECRET_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq, ssh client and ansible (if missing)
+        run: |
+          if ! command -v jq >/dev/null || ! command -v ansible-playbook >/dev/null || ! command -v ssh >/dev/null; then
+            apt-get update -qq && apt-get install -y -qq jq ansible openssh-client
+          fi
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: 'v3.16.4'
+
+      - uses: azure/setup-kubectl@v4
+
+      # ── OpenBao: AppRole login + the three secrets we need ─────────────────
+      - name: Fetch secrets from OpenBao
+        run: |
+          set -euo pipefail
+          T=$(curl -sk -X POST "${VAULT_ADDR}/v1/auth/approle/login" \
+                -H "Content-Type: application/json" \
+                -d "{\"role_id\":\"${VAULT_ROLE_ID}\",\"secret_id\":\"${VAULT_SECRET_ID}\"}" \
+              | jq -r '.auth.client_token')
+          if [ -z "$T" ] || [ "$T" = "null" ]; then echo "ERROR: OpenBao login failed"; exit 1; fi
+          echo "::add-mask::$T"
+          get() { curl -sk -H "X-Vault-Token: $T" "${VAULT_ADDR}/v1/homelab/data/$1"; }
+
+          mkdir -p ~/.kube ~/.ssh
+          chmod 700 ~/.ssh
+
+          # kubeconfig
+          get microk8s | jq -r '.data.data.kubeconfig // empty' > ~/.kube/config
+          chmod 600 ~/.kube/config
+          [ -s ~/.kube/config ] || { echo "ERROR: homelab/data/microk8s has no kubeconfig"; exit 1; }
+
+          # Ansible SSH key (existing secret)
+          get ansible | jq -r '.data.data.ssh_private_key // empty' > ~/.ssh/ansible_key
+          chmod 600 ~/.ssh/ansible_key
+          grep -q 'BEGIN' ~/.ssh/ansible_key || { echo "ERROR: homelab/data/ansible ssh_private_key is empty or not a key"; exit 1; }
+
+          # SNMPv3 credentials
+          S=$(get snmp)
+          U=$(echo "$S" | jq -r '.data.data.username // empty')
+          A=$(echo "$S" | jq -r '.data.data.auth_password // empty')
+          P=$(echo "$S" | jq -r '.data.data.priv_password // empty')
+          for v in "$U" "$A" "$P"; do [ -n "$v" ] || { echo "ERROR: homelab/data/snmp needs username, auth_password, priv_password"; exit 1; }; done
+          echo "::add-mask::$A"
+          echo "::add-mask::$P"
+          {
+            echo "SNMP_USER=$U"
+            echo "SNMP_AUTH_PASS=$A"
+            echo "SNMP_PRIV_PASS=$P"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify cluster access
+        run: kubectl cluster-info
+
+      # ── Ubuntu hosts: snmpd + GPU extends ──────────────────────────────────
+      - name: Configure Ubuntu hosts with Ansible
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.configure_hosts == 'true' }}
+        run: |
+          export ANSIBLE_PRIVATE_KEY_FILE="$HOME/.ssh/ansible_key"
+          cd ansible
+          ansible-playbook playbook.yml
+
+      # ── Kubernetes: Secret (kept out of Helm history) + chart ──────────────
+      - name: Create/update SNMP auth Secret
+        run: |
+          kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic "${AUTH_SECRET}" -n "${NAMESPACE}" \
+            --from-literal=SNMP_USER="${SNMP_USER}" \
+            --from-literal=SNMP_AUTH_PASS="${SNMP_AUTH_PASS}" \
+            --from-literal=SNMP_PRIV_PASS="${SNMP_PRIV_PASS}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Helm deploy
+        run: |
+          helm upgrade --install "${RELEASE}" ./helm-chart \
+            --namespace "${NAMESPACE}" \
+            -f hosts.yaml \
+            --set existingSecretName="${AUTH_SECRET}" \
+            --wait --timeout 3m
+
+      - name: Restart exporter (pick up rotated credentials) and wait
+        run: |
+          kubectl rollout restart deployment/${RELEASE}-snmp-exporter -n "${NAMESPACE}"
+          kubectl rollout status  deployment/${RELEASE}-snmp-exporter -n "${NAMESPACE}" --timeout=90s
+
+      - name: Show result
+        if: always()
+        run: |
+          kubectl get deploy,svc,scrapeconfig,prometheusrule -n "${NAMESPACE}" | grep "${RELEASE}" || true
+          kubectl get configmap -n "${NAMESPACE}" -l grafana_dashboard=1 | grep "${RELEASE}" || true
+
+      - name: Cleanup
+        if: always()
+        run: rm -rf ~/.kube/config ~/.ssh/ansible_key

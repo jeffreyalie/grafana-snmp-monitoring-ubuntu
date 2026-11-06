@@ -1,0 +1,6 @@
+snmp_user: "{{ lookup('env', 'SNMP_USER') }}"
+snmp_auth_pass: "{{ lookup('env', 'SNMP_AUTH_PASS') }}"
+snmp_priv_pass: "{{ lookup('env', 'SNMP_PRIV_PASS') }}"
+snmp_listen: "udp:161"
+snmp_gpu: false
+snmp_allowed_source: ""
