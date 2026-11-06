@@ -135,7 +135,7 @@ Here is the Ubuntu side, since it doesn’t depend on how the chart ends up. The
 sudo apt update
 sudo apt install -y snmpd snmp
 ```
-2. Create a read-only SNMPv3 user (stop the service first, since snmpd rewrites this file on start):
+2. **Create a read-only SNMPv3 user** (stop the service first, since snmpd rewrites this file on start):
 
 ```bash
 sudo systemctl stop snmpd
@@ -143,7 +143,7 @@ echo 'createUser prom SHA "CHANGE_AUTH_PASS" AES "CHANGE_PRIV_PASS"' | sudo tee 
 ```
 Use passphrases of at least 8 characters. On start, snmpd replaces this line with a hashed version.
 
-3. Edit /etc/snmp/snmpd.conf. Ubuntu’s default listens on localhost only and ships with community strings, so remove the rocommunity lines and set:
+3. Edit ```/etc/snmp/snmpd.conf```. Ubuntu’s default listens on localhost only and ships with community strings, so remove the ```rocommunity``` lines and set:
 
 ```conf
 agentaddress udp:161
@@ -160,7 +160,7 @@ extend gpu-mem  /usr/bin/nvidia-smi --query-gpu=memory.used,memory.total --forma
 extend gpu-temp /usr/bin/nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits
 ```
 
-The values appear under NET-SNMP-EXTEND-MIB and snmp_exporter converts them to numbers with a regex. This works, but a plain node_exporter with a GPU exporter would be simpler if you ever want to drop SNMP for GPUs.
+The values appear under ```NET-SNMP-EXTEND-MIB``` and ```snmp_exporter``` converts them to numbers with a regex. This works, but a plain ```node_exporter``` with a GPU exporter would be simpler if you ever want to drop SNMP for GPUs.
 
 5. Start it and open the firewall to the MicroK8s node only. Pod traffic leaves with the node’s IP:
 
@@ -168,11 +168,11 @@ The values appear under NET-SNMP-EXTEND-MIB and snmp_exporter converts them to n
 sudo systemctl enable --now snmpd
 sudo ufw allow from 10.206.213.243 to any port 161 proto udp
 ```
-6. Test from the MicroK8s node (apt install snmp there):
+6. Test from the MicroK8s node (```apt install snmp``` there):
 
 ```bash
 snmpwalk -v3 -l authPriv -u prom -a SHA -A 'CHANGE_AUTH_PASS' -x AES -X 'CHANGE_PRIV_PASS' <ubuntu-ip> 1.3.6.1.4.1.2021.10   # load average
 snmpwalk -v3 -l authPriv -u prom -a SHA -A 'CHANGE_AUTH_PASS' -x AES -X 'CHANGE_PRIV_PASS' <ubuntu-ip> 1.3.6.1.4.1.8072.1.3.2   # GPU extends
 ```
 
-Using your Ansible secrets: I’d turn steps 1 to 5 into a small Ansible role. The deploy workflow would pull homelab/data/ansible from OpenBao, run the role against the hosts, and store the SNMP credentials at a new path, homelab/data/snmp. Remember that bao policy write overwrites, so the gitea-runner policy needs all existing paths plus the new one.
+Using your Ansible secrets: I’d turn steps 1 to 5 into a small Ansible role. The deploy workflow would pull ```homelab/data/ansible``` from OpenBao, run the role against the hosts, and store the SNMP credentials at a new path, ```homelab/data/snmp```. Remember that ```bao policy write``` overwrites, so the ```gitea-runner``` policy needs all existing paths plus the new one.
